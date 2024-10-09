@@ -4,16 +4,14 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <time.h>
+#include <netinet/in.h>
 
 #define BUFFER_SIZE 1024
 #define DHCP_SERVER_PORT 67
-#define DHCP_CLIENT_PORT 69
-#define IP_RANGE_START "192.169.1.100"
-#define IP_RANGE_END "192.169.1.200"
+#define DHCP_CLIENT_PORT 68
+#define CIDR_NOTATION "192.0.0.1/19"
 #define LEASE_TIME 3600 // 1 hour
 #define DNS_SERVER "8.8.8.8" // Example DNS server
-#define DEFAULT_GATEWAY "192.168.1.1" // Example default gateway
-#define SUBNET_MASK "255.255.255.0" // Example subnet mask
 
 typedef struct {
     uint8_t op;
@@ -42,19 +40,48 @@ typedef struct {
 IPLease ip_leases[256];
 int lease_count = 0;
 
+struct in_addr network_address;
+struct in_addr subnet_mask;
+struct in_addr broadcast_address;
+struct in_addr default_gateway;
+struct in_addr ip_range_start;
+struct in_addr ip_range_end;
+
+void initialize_network() {
+    char ip_str[16];
+    int prefix_len;
+    sscanf(CIDR_NOTATION, "%[^/]/%d", ip_str, &prefix_len);
+
+    inet_pton(AF_INET, ip_str, &network_address);
+    
+    uint32_t mask = 0xffffffff << (32 - prefix_len);
+    subnet_mask.s_addr = htonl(mask);
+
+    broadcast_address.s_addr = network_address.s_addr | ~subnet_mask.s_addr;
+    
+    // Calculate default gateway (first usable IP in the network)
+    default_gateway.s_addr = htonl(ntohl(network_address.s_addr) + 1);
+
+    // Calculate IP range (10 IPs for testing)
+    ip_range_start.s_addr = htonl(ntohl(network_address.s_addr) + 2);
+    ip_range_end.s_addr = htonl(ntohl(ip_range_start.s_addr) + 9);
+
+    printf("Network: %s\n", inet_ntoa(network_address));
+    printf("Subnet Mask: %s\n", inet_ntoa(subnet_mask));
+    printf("Broadcast: %s\n", inet_ntoa(broadcast_address));
+    printf("Default Gateway: %s\n", inet_ntoa(default_gateway));
+    printf("IP Range Start: %s\n", inet_ntoa(ip_range_start));
+    printf("IP Range End: %s\n", inet_ntoa(ip_range_end));
+}
+
 int is_ip_in_range(struct in_addr ip) {
-    struct in_addr start, end;
-    inet_aton(IP_RANGE_START, &start);
-    inet_aton(IP_RANGE_END, &end);
-    return (ntohl(ip.s_addr) >= ntohl(start.s_addr) && ntohl(ip.s_addr) <= ntohl(end.s_addr));
+    return (ntohl(ip.s_addr) >= ntohl(ip_range_start.s_addr) && ntohl(ip.s_addr) <= ntohl(ip_range_end.s_addr));
 }
 
 struct in_addr get_available_ip() {
-    struct in_addr ip;
-    inet_aton(IP_RANGE_START, &ip);
-    for (int i = 0; i < 256; i++) {
-        ip.s_addr = htonl(ntohl(ip.s_addr) + i);
-        if (!is_ip_in_range(ip)) break;
+    struct in_addr ip = ip_range_start;
+    for (uint32_t i = 0; i <= ntohl(ip_range_end.s_addr) - ntohl(ip_range_start.s_addr); i++) {
+        ip.s_addr = htonl(ntohl(ip_range_start.s_addr) + i);
         int available = 1;
         for (int j = 0; j < lease_count; j++) {
             if (ip_leases[j].ip.s_addr == ip.s_addr) {
@@ -103,8 +130,6 @@ void handle_dhcp_discover(int sockfd, DHCPMessage *msg, struct sockaddr_in *clie
 
     options[13] = 1; // Subnet Mask
     options[14] = 4; // Length
-    struct in_addr subnet_mask;
-    inet_aton(SUBNET_MASK, &subnet_mask);
     memcpy(&options[15], &subnet_mask, 4);
 
     options[19] = 6; // DNS Server
@@ -115,8 +140,6 @@ void handle_dhcp_discover(int sockfd, DHCPMessage *msg, struct sockaddr_in *clie
 
     options[25] = 3; // Router (Default Gateway)
     options[26] = 4; // Length
-    struct in_addr default_gateway;
-    inet_aton(DEFAULT_GATEWAY, &default_gateway);
     memcpy(&options[27], &default_gateway, 4);
 
     options[31] = 255; // End option
@@ -185,8 +208,6 @@ void handle_dhcp_request(int sockfd, DHCPMessage *msg, struct sockaddr_in *clien
 
     options[13] = 1; // Subnet Mask
     options[14] = 4; // Length
-    struct in_addr subnet_mask;
-    inet_aton(SUBNET_MASK, &subnet_mask);
     memcpy(&options[15], &subnet_mask, 4);
 
     options[19] = 6; // DNS Server
@@ -197,8 +218,6 @@ void handle_dhcp_request(int sockfd, DHCPMessage *msg, struct sockaddr_in *clien
 
     options[25] = 3; // Router (Default Gateway)
     options[26] = 4; // Length
-    struct in_addr default_gateway;
-    inet_aton(DEFAULT_GATEWAY, &default_gateway);
     memcpy(&options[27], &default_gateway, 4);
 
     options[31] = 255; // End option
@@ -257,6 +276,8 @@ int main() {
         close(sockfd);
         exit(1);
     }
+
+    initialize_network();
 
     printf("DHCP server is running...\n");
 
