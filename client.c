@@ -33,40 +33,38 @@ typedef struct
 void read_dhcp_options(DHCPMessage *msg)
 {
     uint8_t *options = msg->options;
-    int i = 13; // Skip the magic cookie
+    int i = 13; // Start after the magic cookie and the first option
 
-    while (i < sizeof(msg->options) && options[i] != 255)
+    struct in_addr ip_addr;
+    ip_addr.s_addr = msg->yiaddr;
+
+    while (i < sizeof(msg->options) && options[i] != 255) // 255 is the END option
     {
         uint8_t option_type = options[i++];
+        if (i >= sizeof(msg->options)) break;
         uint8_t option_length = options[i++];
+
+        if (i + option_length > sizeof(msg->options)) {
+            break;
+        }
 
         switch (option_type)
         {
-        case 1:
-            printf("Subnet Mask: ");
+        case 1: // Subnet Mask
+            {
+                struct in_addr subnet;
+                memcpy(&subnet.s_addr, &options[i], 4);
+                printf("Subnet Mask: %s\n", inet_ntoa(subnet));
+            }
             break;
-        case 3:
-            printf("Default Gateway: ");
-            break;
-        case 6:
-            printf("DNS Server: ");
-            break;
-        default:
+        case 6: // DNS Server
+            {
+                struct in_addr dns;
+                memcpy(&dns.s_addr, &options[i], 4);
+                printf("DNS Server: %s\n", inet_ntoa(dns));
+            }
             break;
         }
-
-        for (int j = 0; j < option_length; j++)
-        {
-            if (j + 1 == option_length)
-            {
-                printf("%d", options[i + j]);
-            }
-            else
-            {
-                printf("%d.", options[i + j]);
-            }
-        }
-        printf("\n");
 
         i += option_length;
     }
@@ -230,7 +228,7 @@ int main()
     send_dhcp_discover(sockfd, &server_addr);
 
     // Receive DHCPOFFER
-    ssize_t recv_len = recvfrom(sockfd, buffer, 256, 0, (struct sockaddr *)&server_addr, &server_len);
+    ssize_t recv_len = recvfrom(sockfd, buffer, BUFFER_SIZE, 0, (struct sockaddr *)&server_addr, &server_len);
     if (recv_len < 0)
     {
         perror("Error receiving data");
