@@ -11,8 +11,8 @@
 #define DHCP_SERVER_PORT 67
 #define DHCP_CLIENT_PORT 68
 #define CIDR_NOTATION "192.17.0.1/24"
-#define LEASE_TIME 3600 // 1 hour
-#define DNS_SERVER "8.8.8.8" // Example DNS server
+#define LEASE_TIME 5 // 5 seconds for testing purposes
+#define DNS_SERVER "8.8.8.8"
 
 typedef struct {
     uint8_t op;
@@ -35,6 +35,7 @@ typedef struct {
 typedef struct {
     struct in_addr ip;
     time_t lease_start;
+    time_t lease_expiration;
     uint8_t chaddr[16];
 } IPLease;
 
@@ -181,6 +182,7 @@ void handle_dhcp_request(int sockfd, DHCPMessage *msg, struct sockaddr_in *clien
 
     ip_leases[lease_count].ip = requested_ip;
     ip_leases[lease_count].lease_start = time(NULL);
+    ip_leases[lease_count].lease_expiration = time(NULL) + LEASE_TIME;
     memcpy(ip_leases[lease_count].chaddr, msg->chaddr, 16);
     lease_count++;
 
@@ -238,9 +240,10 @@ void handle_dhcp_request(int sockfd, DHCPMessage *msg, struct sockaddr_in *clien
 
 void handle_dhcp_release(DHCPMessage *msg) {
     struct in_addr released_ip;
-    released_ip.s_addr = msg->ciaddr;
+    released_ip.s_addr = msg->yiaddr;
 
-    pthread_mutex_lock(&mutex);
+    printf("Releasing IP: %s\n", inet_ntoa(released_ip));
+
     for (int i = 0; i < lease_count; i++) {
         if (ip_leases[i].ip.s_addr == released_ip.s_addr && memcmp(ip_leases[i].chaddr, msg->chaddr, 16) == 0) {
             printf("Releasing IP: %s\n", inet_ntoa(released_ip));
@@ -257,6 +260,48 @@ void handle_dhcp_release(DHCPMessage *msg) {
     printf("IP not found for release: %s\n", inet_ntoa(released_ip));
 }
 
+void handle_dhcp_renew(int sockfd, DHCPMessage *msg, struct sockaddr_in *client_addr) {
+    struct in_addr client_ip;
+    client_ip.s_addr = msg->ciaddr;
+
+    pthread_mutex_lock(&mutex);
+    for (int i = 0; i < lease_count; i++) {
+        if (ip_leases[i].ip.s_addr == client_ip.s_addr && memcmp(ip_leases[i].chaddr, msg->chaddr, 16) == 0) {
+            // Renew the lease
+            ip_leases[i].lease_expiration = time(NULL) + LEASE_TIME;
+            
+            // Send DHCPACK
+            DHCPMessage ack_msg;
+            // ... (prepare DHCPACK message similar to handle_dhcp_request)
+            
+            sendto(sockfd, &ack_msg, sizeof(ack_msg), 0, (struct sockaddr *)client_addr, sizeof(*client_addr));
+            printf("Renewed lease for IP: %s\n", inet_ntoa(client_ip));
+            pthread_mutex_unlock(&mutex);
+            return;
+        }
+    }
+    pthread_mutex_unlock(&mutex);
+    printf("Renewal failed for IP: %s\n", inet_ntoa(client_ip));
+}
+
+void print_active_leases() {
+    pthread_mutex_lock(&mutex);
+    printf("\n--- Active IP Leases ---\n");
+    for (int i = 0; i < lease_count; i++) {
+        char mac_str[18];
+        snprintf(mac_str, sizeof(mac_str), "%02x:%02x:%02x:%02x:%02x:%02x",
+                 ip_leases[i].chaddr[0], ip_leases[i].chaddr[1], ip_leases[i].chaddr[2],
+                 ip_leases[i].chaddr[3], ip_leases[i].chaddr[4], ip_leases[i].chaddr[5]);
+        
+        time_t remaining = ip_leases[i].lease_expiration - time(NULL);
+        
+        printf("IP: %s, MAC: %s, Expires in: %ld seconds\n",
+               inet_ntoa(ip_leases[i].ip), mac_str, remaining);
+    }
+    printf("------------------------\n\n");
+    pthread_mutex_unlock(&mutex);
+}
+
 void *handle_client(void *arg) {
     int sockfd = *(int *)arg;
     struct sockaddr_in client_addr;
@@ -266,6 +311,7 @@ void *handle_client(void *arg) {
 
     while (1) {
         // Receive DHCP message
+        print_active_leases();
         ssize_t recv_len = recvfrom(sockfd, buffer, BUFFER_SIZE, 0, (struct sockaddr *)&client_addr, &client_len);
         if (recv_len < 0) {
             perror("Error receiving data");
@@ -280,14 +326,16 @@ void *handle_client(void *arg) {
             case 1: // DHCP DISCOVER
                 handle_dhcp_discover(sockfd, dhcp_msg, &client_addr);
                 break;
-            case 3: // DHCP REQUEST
-                handle_dhcp_request(sockfd, dhcp_msg, &client_addr);
-                break;
             case 7: // DHCP RELEASE
                 handle_dhcp_release(dhcp_msg);
-                pthread_mutex_unlock(&mutex);
-                printf("Client thread terminating after DHCP RELEASE\n");
-                return NULL;
+                break;
+            case 3: // DHCP REQUEST (could be new request or renewal)
+                if (dhcp_msg->ciaddr != 0) {
+                    handle_dhcp_renew(sockfd, dhcp_msg, &client_addr);
+                } else {
+                    handle_dhcp_request(sockfd, dhcp_msg, &client_addr);
+                }
+                break;
             default:
                 printf("Unknown DHCP message type\n");
                 break;
@@ -295,6 +343,30 @@ void *handle_client(void *arg) {
         pthread_mutex_unlock(&mutex);
     }
 
+    return NULL;
+}
+
+void *lease_manager(void *arg) {
+    while (1) {
+        pthread_mutex_lock(&mutex);
+        time_t current_time = time(NULL);
+        
+        for (int i = 0; i < lease_count; i++) {
+            if (current_time > ip_leases[i].lease_expiration) {
+                printf("Lease expired for IP: %s\n", inet_ntoa(ip_leases[i].ip));
+                
+                // Remove the expired lease
+                for (int j = i; j < lease_count - 1; j++) {
+                    ip_leases[j] = ip_leases[j + 1];
+                }
+                lease_count--;
+                i--; // Adjust index after removal
+            }
+        }
+        
+        pthread_mutex_unlock(&mutex);
+        sleep(1); // Check every second
+    }
     return NULL;
 }
 
@@ -325,6 +397,13 @@ int main() {
     initialize_network();
 
     printf("DHCP server is running...\n");
+
+    pthread_t lease_manager_tid, lease_display_tid;
+    if (pthread_create(&lease_manager_tid, NULL, lease_manager, NULL) != 0) {
+        perror("Failed to create lease manager thread");
+        exit(1);
+    }
+
 
     // Create threads to handle clients
     pthread_t tid;

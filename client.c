@@ -164,7 +164,7 @@ void send_dhcp_release(int sockfd, struct sockaddr_in *server_addr, DHCPMessage 
     release_msg.htype = 1;                           // Ethernet
     release_msg.hlen = 6;                            // MAC address length
     release_msg.xid = ack_msg->xid;                  // Use the same transaction ID
-    release_msg.ciaddr = ack_msg->yiaddr;            // Client IP address
+    release_msg.yiaddr = ack_msg->yiaddr;            // Client IP address
     memcpy(release_msg.chaddr, ack_msg->chaddr, 16); // Copy the client's MAC address
 
     // Set DHCP options
