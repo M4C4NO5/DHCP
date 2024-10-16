@@ -5,11 +5,12 @@
 #include <arpa/inet.h>
 #include <time.h>
 #include <netinet/in.h>
+#include <pthread.h>
 
 #define BUFFER_SIZE 1024
 #define DHCP_SERVER_PORT 67
 #define DHCP_CLIENT_PORT 68
-#define CIDR_NOTATION "192.0.0.1/19"
+#define CIDR_NOTATION "192.17.0.1/24"
 #define LEASE_TIME 3600 // 1 hour
 #define DNS_SERVER "8.8.8.8" // Example DNS server
 
@@ -46,6 +47,9 @@ struct in_addr broadcast_address;
 struct in_addr default_gateway;
 struct in_addr ip_range_start;
 struct in_addr ip_range_end;
+
+// Agregar un mutex global para proteger el acceso a recursos compartidos
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
 void initialize_network() {
     char ip_str[16];
@@ -236,6 +240,7 @@ void handle_dhcp_release(DHCPMessage *msg) {
     struct in_addr released_ip;
     released_ip.s_addr = msg->ciaddr;
 
+    pthread_mutex_lock(&mutex);
     for (int i = 0; i < lease_count; i++) {
         if (ip_leases[i].ip.s_addr == released_ip.s_addr && memcmp(ip_leases[i].chaddr, msg->chaddr, 16) == 0) {
             printf("Releasing IP: %s\n", inet_ntoa(released_ip));
@@ -244,18 +249,58 @@ void handle_dhcp_release(DHCPMessage *msg) {
                 ip_leases[j] = ip_leases[j + 1];
             }
             lease_count--;
+            pthread_mutex_unlock(&mutex);
             return;
         }
     }
+    pthread_mutex_unlock(&mutex);
     printf("IP not found for release: %s\n", inet_ntoa(released_ip));
+}
+
+void *handle_client(void *arg) {
+    int sockfd = *(int *)arg;
+    struct sockaddr_in client_addr;
+    socklen_t client_len = sizeof(client_addr);
+    char buffer[BUFFER_SIZE];
+    DHCPMessage *dhcp_msg;
+
+    while (1) {
+        // Receive DHCP message
+        ssize_t recv_len = recvfrom(sockfd, buffer, BUFFER_SIZE, 0, (struct sockaddr *)&client_addr, &client_len);
+        if (recv_len < 0) {
+            perror("Error receiving data");
+            continue;
+        }
+
+        dhcp_msg = (DHCPMessage *)buffer;
+
+        // Process DHCP message
+        pthread_mutex_lock(&mutex);
+        switch (dhcp_msg->options[6]) {
+            case 1: // DHCP DISCOVER
+                handle_dhcp_discover(sockfd, dhcp_msg, &client_addr);
+                break;
+            case 3: // DHCP REQUEST
+                handle_dhcp_request(sockfd, dhcp_msg, &client_addr);
+                break;
+            case 7: // DHCP RELEASE
+                handle_dhcp_release(dhcp_msg);
+                pthread_mutex_unlock(&mutex);
+                printf("Client thread terminating after DHCP RELEASE\n");
+                return NULL;
+            default:
+                printf("Unknown DHCP message type\n");
+                break;
+        }
+        pthread_mutex_unlock(&mutex);
+    }
+
+    return NULL;
 }
 
 int main() {
     int sockfd;
-    struct sockaddr_in server_addr, client_addr;
-    socklen_t client_len = sizeof(client_addr);
-    char buffer[BUFFER_SIZE];
-    DHCPMessage *dhcp_msg;
+    struct sockaddr_in server_addr;
 
     // Create UDP socket
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -281,32 +326,17 @@ int main() {
 
     printf("DHCP server is running...\n");
 
-    while (1) {
-        // Receive DHCP message
-        ssize_t recv_len = recvfrom(sockfd, buffer, BUFFER_SIZE, 0, (struct sockaddr *)&client_addr, &client_len);
-        if (recv_len < 0) {
-            perror("Error receiving data");
-            continue;
-        }
-
-        dhcp_msg = (DHCPMessage *)buffer;
-
-        // Process DHCP message
-        switch (dhcp_msg->options[6]) {
-            case 1: // DHCP DISCOVER
-                handle_dhcp_discover(sockfd, dhcp_msg, &client_addr);
-                break;
-            case 3: // DHCP REQUEST
-                handle_dhcp_request(sockfd, dhcp_msg, &client_addr);
-                break;
-            case 7: // DHCP RELEASE
-                handle_dhcp_release(dhcp_msg);
-                break;
-            default:
-                printf("Unknown DHCP message type\n");
-                break;
+    // Create threads to handle clients
+    pthread_t tid;
+    for (int i = 0; i < 3; i++) {  // Create 5 threads to handle clients
+        if (pthread_create(&tid, NULL, handle_client, (void *)&sockfd) != 0) {
+            perror("Failed to create thread");
+            exit(1);
         }
     }
+
+    // Wait for threads to finish (which they never will in this case)
+    pthread_exit(NULL);
 
     close(sockfd);
     return 0;

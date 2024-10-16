@@ -17,7 +17,7 @@ $(CLIENT_BIN): $(CLIENT_SRC)
 
 server:
 	clear
-	$(CC) $(CFLAGS) -o $(SERVER_BIN) $(SERVER_SRC)
+	$(CC) $(CFLAGS) -o $(SERVER_BIN) $(SERVER_SRC) -pthread
 	sudo ./$(SERVER_BIN)
 
 client:

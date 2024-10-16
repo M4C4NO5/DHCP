@@ -259,5 +259,6 @@ int main()
     send_dhcp_release(sockfd, &server_addr, dhcp_msg);
 
     close(sockfd);
+    printf("Client terminating after DHCP RELEASE\n");
     return 0;
 }
