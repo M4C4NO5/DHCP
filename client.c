@@ -6,10 +6,14 @@
 #include <time.h>
 #include <net/if.h>
 #include <sys/ioctl.h>
+#include <signal.h>
 
 #define BUFFER_SIZE 1024
 #define DHCP_SERVER_PORT 67
 #define DHCP_CLIENT_PORT 69
+#define LEASE_TIME 60
+
+volatile sig_atomic_t lease_expired = 0;
 
 typedef struct
 {
@@ -197,6 +201,38 @@ void send_dhcp_release(int sockfd, struct sockaddr_in *server_addr, DHCPMessage 
     printf("Sent DHCP RELEASE\n");
 }
 
+void send_dhcp_renew(int sockfd, struct sockaddr_in *server_addr, DHCPMessage *ack_msg) {
+    DHCPMessage renew_msg;
+    memset(&renew_msg, 0, sizeof(renew_msg));
+    renew_msg.op = 1;                   // BOOTREQUEST
+    renew_msg.htype = 1;                // Ethernet
+    renew_msg.hlen = 6;                 // MAC address length
+    renew_msg.xid = ack_msg->xid;       // Use the same transaction ID
+    renew_msg.ciaddr = ack_msg->yiaddr; // Current IP address
+    renew_msg.yiaddr = ack_msg->yiaddr;
+    memcpy(renew_msg.chaddr, ack_msg->chaddr, 16);
+
+    // Set DHCP options
+    uint8_t *options = renew_msg.options;
+    options[0] = 0x63; // Magic cookie
+    options[1] = 0x82;
+    options[2] = 0x53;
+    options[3] = 0x63;
+
+    options[4] = 53; // DHCP Message Type
+    options[5] = 1;  // Length
+    options[6] = 3;  // DHCPREQUEST (used for renewing)
+
+    options[7] = 54; // Server Identifier
+    options[8] = 4;  // Length
+    memcpy(&options[9], &ack_msg->siaddr, 4);
+
+    options[13] = 255; // End option
+
+    sendto(sockfd, &renew_msg, sizeof(renew_msg), 0, (struct sockaddr *)server_addr, sizeof(*server_addr));
+    printf("Sent DHCP RENEW\n");
+}
+
 int main()
 {
     int sockfd;
@@ -257,9 +293,10 @@ int main()
 
     // Simulate some usage
     sleep(30);
+    
 
     // Send DHCPRELEASE
-    send_dhcp_release(sockfd, &server_addr, dhcp_msg);
+    send_dhcp_renew(sockfd, &server_addr, dhcp_msg);
 
     close(sockfd);
     printf("Client terminating after DHCP RELEASE\n");

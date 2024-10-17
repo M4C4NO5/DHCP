@@ -290,9 +290,8 @@ void handle_dhcp_release(DHCPMessage *msg)
 void handle_dhcp_renew(int sockfd, DHCPMessage *msg, struct sockaddr_in *client_addr)
 {
     struct in_addr client_ip;
-    client_ip.s_addr = msg->ciaddr;
+    client_ip.s_addr = msg->yiaddr;
 
-    pthread_mutex_lock(&mutex);
     for (int i = 0; i < lease_count; i++)
     {
         if (ip_leases[i].ip.s_addr == client_ip.s_addr && memcmp(ip_leases[i].chaddr, msg->chaddr, 16) == 0)
