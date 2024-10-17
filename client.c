@@ -41,33 +41,36 @@ void read_dhcp_options(DHCPMessage *msg)
     while (i < sizeof(msg->options) && options[i] != 255) // 255 is the END option
     {
         uint8_t option_type = options[i++];
-        if (i >= sizeof(msg->options)) break;
+        if (i >= sizeof(msg->options))
+            break;
         uint8_t option_length = options[i++];
 
-        if (i + option_length > sizeof(msg->options)) {
+        if (i + option_length > sizeof(msg->options))
+        {
             break;
         }
 
         switch (option_type)
         {
         case 1: // Subnet Mask
-            {
-                struct in_addr subnet;
-                memcpy(&subnet.s_addr, &options[i], 4);
-                printf("Subnet Mask: %s\n", inet_ntoa(subnet));
-            }
-            break;
+        {
+            struct in_addr subnet;
+            memcpy(&subnet.s_addr, &options[i], 4);
+            printf("Subnet Mask: %s\n", inet_ntoa(subnet));
+        }
+        break;
         case 6: // DNS Server
-            {
-                struct in_addr dns;
-                memcpy(&dns.s_addr, &options[i], 4);
-                printf("DNS Server: %s\n", inet_ntoa(dns));
-            }
-            break;
+        {
+            struct in_addr dns;
+            memcpy(&dns.s_addr, &options[i], 4);
+            printf("DNS Server: %s\n", inet_ntoa(dns));
+        }
+        break;
         }
 
         i += option_length;
     }
+    printf("\n");
 }
 
 void send_dhcp_discover(int sockfd, struct sockaddr_in *server_addr)
