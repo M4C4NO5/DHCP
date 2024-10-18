@@ -8,8 +8,7 @@
 #include <pthread.h>
 
 #define BUFFER_SIZE 1024
-#define DHCP_SERVER_PORT 67
-#define DHCP_CLIENT_PORT 68
+#define DHCP_SERVER_PORT 69
 #define CIDR_NOTATION "192.17.0.1/32"
 #define LEASE_TIME 60 // 5 seconds for testing purposes
 #define DNS_SERVER "8.8.8.8"
