@@ -8,7 +8,7 @@
 #include <pthread.h>
 
 #define BUFFER_SIZE 1024
-#define DHCP_SERVER_PORT 69
+#define DHCP_SERVER_PORT 67
 #define CIDR_NOTATION "192.17.0.1/32"
 #define LEASE_TIME 20 // 5 seconds for testing purposes
 #define DNS_SERVER "8.8.8.8"
@@ -289,7 +289,7 @@ void handle_dhcp_release(DHCPMessage *msg)
 void handle_dhcp_renew(int sockfd, DHCPMessage *msg, struct sockaddr_in *client_addr)
 {
     struct in_addr client_ip;
-    client_ip.s_addr = msg->ciaddr;  // Cambiado de msg->yiaddr a msg->ciaddr
+    client_ip.s_addr = msg->ciaddr; // Cambiado de msg->yiaddr a msg->ciaddr
 
     for (int i = 0; i < lease_count; i++)
     {
@@ -361,8 +361,8 @@ void print_active_leases()
 
         time_t remaining = ip_leases[i].lease_expiration - time(NULL);
 
-        printf("IP: %s, MAC: %s, Expires in: %ld seconds\n",
-               inet_ntoa(ip_leases[i].ip), mac_str, remaining);
+        printf("IP: %s, Expires in: %ld seconds\n",
+               inet_ntoa(ip_leases[i].ip), remaining);
     }
     printf("------------------------\n\n");
     pthread_mutex_unlock(&mutex);

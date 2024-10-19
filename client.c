@@ -343,12 +343,12 @@ int main()
     }
 
     printf("Press SPACE to release the IP address\n");
-    
+
     while (1) {
         if (lease_expired) {
             lease_expired = 0;
             send_dhcp_renew(sockfd, &server_addr, dhcp_msg);
-            
+
             // Receive DHCPACK after renew
             recv_len = recvfrom(sockfd, buffer, BUFFER_SIZE, 0, (struct sockaddr *)&server_addr, &server_len);
             if (recv_len < 0) {
