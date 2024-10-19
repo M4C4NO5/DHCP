@@ -30,7 +30,7 @@ client:
 relay:
 	clear
 	$(CC) $(CFLAGS) -o $(RELAY_BIN) $(RELAY_SRC)
-	sudo ./$(RELAY_BIN)
+	sudo ./$(RELAY_BIN) $(ip)
 
 clean:
 	rm -f $(SERVER_BIN) $(CLIENT_BIN)
