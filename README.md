@@ -3,7 +3,10 @@
 Este proyecto comprende la codificación de un Servidor DHCP en el lenguaje de programación C. Contiene tanto el servidor como el cliente que se conecta a él, junto con un Makefile para hacer más ágil la compilación y ejecución de los programas.
 
 ## Video explicativo
-Haga click aquí para ir al video
+[Haga click aquí para ir al video](https://youtu.be/HBlyq_6-99g)
+
+# Diagrama UML
+![UML DHCP](https://github.com/user-attachments/assets/b3606953-00e5-456b-8d3c-878050b4f0cd)
 
 # Requerimientos
 - C con el compilador 'cc', en caso de tener otro compilador como 'gcc' u otros, cambiar el comando en el Makefile.
