@@ -10,7 +10,7 @@
 #define BUFFER_SIZE 1024
 #define DHCP_SERVER_PORT 69
 #define CIDR_NOTATION "192.17.0.1/32"
-#define LEASE_TIME 60 // 5 seconds for testing purposes
+#define LEASE_TIME 20 // 5 seconds for testing purposes
 #define DNS_SERVER "8.8.8.8"
 
 typedef struct
@@ -289,7 +289,7 @@ void handle_dhcp_release(DHCPMessage *msg)
 void handle_dhcp_renew(int sockfd, DHCPMessage *msg, struct sockaddr_in *client_addr)
 {
     struct in_addr client_ip;
-    client_ip.s_addr = msg->yiaddr;
+    client_ip.s_addr = msg->ciaddr;  // Cambiado de msg->yiaddr a msg->ciaddr
 
     for (int i = 0; i < lease_count; i++)
     {
@@ -300,15 +300,51 @@ void handle_dhcp_renew(int sockfd, DHCPMessage *msg, struct sockaddr_in *client_
 
             // Send DHCPACK
             DHCPMessage ack_msg;
-            // ... (prepare DHCPACK message similar to handle_dhcp_request)
+            memset(&ack_msg, 0, sizeof(ack_msg));
+            ack_msg.op = 2; // BOOTREPLY
+            ack_msg.htype = msg->htype;
+            ack_msg.hlen = msg->hlen;
+            ack_msg.xid = msg->xid;
+            memcpy(ack_msg.chaddr, msg->chaddr, 16);
+            ack_msg.yiaddr = client_ip.s_addr;
+
+            // Set DHCP options
+            uint8_t *options = ack_msg.options;
+            options[0] = 0x63; // Magic cookie
+            options[1] = 0x82;
+            options[2] = 0x53;
+            options[3] = 0x63;
+
+            options[4] = 53; // DHCP Message Type
+            options[5] = 1;  // Length
+            options[6] = 5;  // DHCPACK
+
+            options[7] = 51; // IP Address Lease Time
+            options[8] = 4;  // Length
+            uint32_t lease_time = htonl(LEASE_TIME);
+            memcpy(&options[9], &lease_time, 4);
+
+            options[13] = 1; // Subnet Mask
+            options[14] = 4; // Length
+            memcpy(&options[15], &subnet_mask, 4);
+
+            options[19] = 6; // DNS Server
+            options[20] = 4; // Length
+            struct in_addr dns_server;
+            inet_aton(DNS_SERVER, &dns_server);
+            memcpy(&options[21], &dns_server, 4);
+
+            options[25] = 3; // Router (Default Gateway)
+            options[26] = 4; // Length
+            memcpy(&options[27], &default_gateway, 4);
+
+            options[31] = 255; // End option
 
             sendto(sockfd, &ack_msg, sizeof(ack_msg), 0, (struct sockaddr *)client_addr, sizeof(*client_addr));
             printf("Renewed lease for IP: %s\n", inet_ntoa(client_ip));
-            pthread_mutex_unlock(&mutex);
             return;
         }
     }
-    pthread_mutex_unlock(&mutex);
     printf("Renewal failed for IP: %s\n", inet_ntoa(client_ip));
 }
 

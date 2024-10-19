@@ -7,10 +7,13 @@
 #include <net/if.h>
 #include <sys/ioctl.h>
 #include <signal.h>
+#include <termios.h>
+#include <fcntl.h>
+#include <sys/time.h>
 
 #define BUFFER_SIZE 1024
 #define DHCP_SERVER_PORT 67
-#define LEASE_TIME 60
+#define LEASE_TIME 20
 
 volatile sig_atomic_t lease_expired = 0;
 
@@ -232,6 +235,35 @@ void send_dhcp_renew(int sockfd, struct sockaddr_in *server_addr, DHCPMessage *a
     printf("Sent DHCP RENEW\n");
 }
 
+void lease_timer_handler(int signum) {
+    lease_expired = 1;
+}
+
+int kbhit(void) {
+    struct termios oldt, newt;
+    int ch;
+    int oldf;
+
+    tcgetattr(STDIN_FILENO, &oldt);
+    newt = oldt;
+    newt.c_lflag &= ~(ICANON | ECHO);
+    tcsetattr(STDIN_FILENO, TCSANOW, &newt);
+    oldf = fcntl(STDIN_FILENO, F_GETFL, 0);
+    fcntl(STDIN_FILENO, F_SETFL, oldf | O_NONBLOCK);
+
+    ch = getchar();
+
+    tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+    fcntl(STDIN_FILENO, F_SETFL, oldf);
+
+    if(ch != EOF) {
+        ungetc(ch, stdin);
+        return 1;
+    }
+
+    return 0;
+}
+
 int main()
 {
     int sockfd;
@@ -290,14 +322,54 @@ int main()
     dhcp_msg = (DHCPMessage *)buffer;
     handle_dhcp_ack(sockfd, dhcp_msg);
 
-    // Simulate some usage
-    sleep(30);
-    
+    // Set up timer for lease expiration
+    struct sigaction sa;
+    struct itimerval timer;
 
-    // Send DHCPRELEASE
-    send_dhcp_renew(sockfd, &server_addr, dhcp_msg);
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = &lease_timer_handler;
+    sigaction(SIGALRM, &sa, NULL);
+
+    // Configure the timer to expire after LEASE_TIME seconds
+    timer.it_value.tv_sec = LEASE_TIME;
+    timer.it_value.tv_usec = 0;
+    timer.it_interval.tv_sec = LEASE_TIME;
+    timer.it_interval.tv_usec = 0;
+
+    // Start the timer
+    if (setitimer(ITIMER_REAL, &timer, NULL) == -1) {
+        perror("Error setting timer");
+        exit(1);
+    }
+
+    printf("Press SPACE to release the IP address\n");
+    
+    while (1) {
+        if (lease_expired) {
+            lease_expired = 0;
+            send_dhcp_renew(sockfd, &server_addr, dhcp_msg);
+            
+            // Receive DHCPACK after renew
+            recv_len = recvfrom(sockfd, buffer, BUFFER_SIZE, 0, (struct sockaddr *)&server_addr, &server_len);
+            if (recv_len < 0) {
+                perror("Error receiving data");
+                break;
+            }
+            dhcp_msg = (DHCPMessage *)buffer;
+            handle_dhcp_ack(sockfd, dhcp_msg);
+        }
+
+        if (kbhit()) {
+            char c = getchar();
+            if (c == ' ') {
+                send_dhcp_release(sockfd, &server_addr, dhcp_msg);
+                break;
+            }
+        }
+ // Sleep for 100ms to reduce CPU usage
+    }
 
     close(sockfd);
-    printf("Client terminating after DHCP RELEASE\n");
+    printf("Client terminating\n");
     return 0;
 }
